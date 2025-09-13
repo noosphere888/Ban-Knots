@@ -243,41 +243,31 @@ echo "$KNOTS_NODES" | jq -c '.' | while read -r node; do
     addr=$(echo "$node" | jq -r '.addr')
     id=$(echo "$node" | jq -r '.id')
     subver=$(echo "$node" | jq -r '.subver')
-    
-    # Extract IP address (remove port)
     base_addr=$(echo "$addr" | sed 's/:.*//' | sed 's/\[//g' | sed 's/\]//g')
-    
+
     echo "Processing: $addr ($subver)"
-    
-    if [[ "$DISCONNECT_ONLY" == "true" ]]; then
-        # Just disconnect
-        echo "  Action: Disconnect (ID: $id)"
-        if [[ "$DRY_RUN" == "false" ]]; then
-            if bitcoin_cli disconnectnode "" "$id" 2>/dev/null; then
-                echo "  Status: Disconnected successfully"
-            else
-                echo "  Status: Failed to disconnect"
-            fi
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        if [[ "$DISCONNECT_ONLY" == "true" ]]; then
+            echo "  Status: [DRY RUN] Would disconnect node ID $id"
         else
-            echo "  Status: [DRY RUN] Would disconnect"
+            echo "  Status: [DRY RUN] Would disconnect and ban IP $base_addr"
         fi
     else
-        # Disconnect and ban
-        echo "  Action: Disconnect and Ban"
-        echo "  Ban Duration: $BAN_DURATION seconds"
-        
-        if [[ "$DRY_RUN" == "false" ]]; then
-            # First disconnect
-            bitcoin_cli disconnectnode "" "$id" 2>/dev/null
-            
-            # Then ban
+        echo "  Action: Disconnect node ID $id"
+        if bitcoin_cli disconnectnode "" "$id" 2>/dev/null; then
+            echo "  Status: Disconnected successfully"
+        else
+            echo "  Status: Failed to disconnect"
+        fi
+
+        if [[ "$DISCONNECT_ONLY" == "false" ]]; then
+            echo "  Action: Ban IP $base_addr for $BAN_DURATION seconds"
             if bitcoin_cli setban "$base_addr" "add" "$BAN_DURATION" 2>/dev/null; then
                 echo "  Status: Banned successfully"
             else
                 echo "  Status: Failed to ban (may already be banned)"
             fi
-        else
-            echo "  Status: [DRY RUN] Would disconnect and ban"
         fi
     fi
     echo ""
