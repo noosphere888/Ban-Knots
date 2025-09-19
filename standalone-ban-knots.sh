@@ -21,6 +21,7 @@ DEFAULT_COOKIE_PATHS=(
     "$HOME/.bitcoin/.cookie"
     "$HOME/Library/Application Support/Bitcoin/.cookie"
     "/var/lib/bitcoind/.cookie"
+    "$HOME/umbrel/app-data/bitcoin/data/bitcoin/.cookie"
 )
 DEFAULT_BITCOIN_CONF_PATHS=(
     "$HOME/.bitcoin/bitcoin.conf"
@@ -36,6 +37,13 @@ if [[ -f "/etc/embassy/config.yaml" ]] || [[ -d "/embassy-data" ]]; then
     # Start9 runs Bitcoin Core in a podman container
     # Don't use -it flag as it requires a TTY (breaks in cron)
     START9_CONTAINER_PREFIX="sudo podman exec bitcoind.embassy"
+fi
+
+# Detect if running on Umbrel
+IS_UMBREL=false
+UMBREL_CONTAINER_PREFIX="docker exec bitcoin_app_1"
+if uname -a | grep -qi "umbrel" ; then
+    IS_UMBREL=true
 fi
 
 # Function to display usage
@@ -59,6 +67,7 @@ Options:
     --install-cron           Install as cron job (runs every 10 minutes)
     --uninstall-cron         Remove cron job
     --cron-interval MIN      Set cron interval in minutes (default: 10)
+    --umbrel                 Umbrel compatibility (default: auto-detect)
     -H, --help               Show this help message
 
 Config file format (one per line):
@@ -89,7 +98,7 @@ read_config() {
                 rpc_host) RPC_HOST="$value" ;;
                 rpc_port) RPC_PORT="$value" ;;
                 rpc_user) RPC_USER="$value" ;;
-                rpc_password) RPC_PASSWORD="$value" ;;
+                rpc_password) RPC_PASSWORD="$(grep "rpc_password" "$config_file" | cut -d '=' -f 2-)" ;;
                 ban_duration) BAN_DURATION="$value" ;;
                 disconnect_only) DISCONNECT_ONLY="$value" ;;
             esac
@@ -206,6 +215,10 @@ while [[ $# -gt 0 ]]; do
             CRON_INTERVAL="$2"
             shift 2
             ;;
+        --umbrel)
+            IS_UMBREL=true
+            shift
+            ;;
         --cookie-path)
             COOKIE_PATH="$2"
             shift 2
@@ -278,6 +291,11 @@ if [[ "$INSTALL_CRON" == "true" ]]; then
     else
         # No explicit auth specified, script will auto-detect
         CRON_CMD="$SCRIPT_PATH"
+    fi
+    
+    # Propagate Umbrel mode, if needed
+    if [[ "IS_UMBREL" == "true" ]]; then
+        CRON_CMD="$CRON_CMD --umbrel"
     fi
     
     # Add logging
@@ -384,6 +402,13 @@ bitcoin_cli() {
             -rpcuser="$RPC_USER" \
             -rpcpassword="$RPC_PASSWORD" \
             "$@"
+    elif [[ "$IS_UMBREL" == "true" ]]; then
+        $UMBREL_CONTAINER_PREFIX bitcoin-cli \
+            -rpcconnect="$RPC_HOST" \
+            -rpcport="$RPC_PORT" \
+            -rpcuser="$RPC_USER" \
+            -rpcpassword="$RPC_PASSWORD" \
+            "$@"
     else
         bitcoin-cli \
             -rpcconnect="$RPC_HOST" \
@@ -397,6 +422,8 @@ bitcoin_cli() {
 echo "=== Bitcoin Knots Node Ban Script ==="
 if [[ "$IS_START9" == "true" ]]; then
     echo "Platform: Start9 (using podman container)"
+elif [[ "$IS_UMBREL" == "true" ]]; then
+    echo "Platform: Umbrel (using Docker container)"
 fi
 echo "RPC Host: $RPC_HOST:$RPC_PORT"
 echo "Disconnect Only: $DISCONNECT_ONLY"
