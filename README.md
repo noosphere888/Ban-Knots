@@ -2,18 +2,31 @@
 
 A plug-and-play script to automatically ban/disconnect Bitcoin Knots nodes from any Bitcoin Core node. Features easy one-command cron installation for continuous protection.
 
+## Why Ban Knots Nodes?
+
+Bitcoin Knots implements restrictive transaction relay policies that can interfere with normal Bitcoin network operations. This script helps maintain your node's mempool and peer connections according to Bitcoin Core's standard policies.
+
 ## Features
 
 - **One-command cron installation** - Set it and forget it!
 - Works with any Bitcoin Core node with RPC enabled
-- Automatic detection of Knots nodes via subversion string
+- **Multiple detection methods**:
+  - Automatic detection of Knots nodes via subversion string
+  - Service flag 26 (NODE_KNOTS) detection for hidden nodes (inspired by [gnoban](https://github.com/caesrcd/gnoban))
+  - Historical IP banlist - maintains your own local list + optional download from [aeonBTC/Knots-Banlist](https://github.com/aeonBTC/Knots-Banlist)
+- Detection of "hidden" Knots nodes that disguise their user agent
+- **Local discovery tracking** - saves found Knots node IPs for future runs
+- **Privacy-focused** - external banlist disabled by default
 - Option to ban or just disconnect nodes
 - Configurable ban duration
 - Dry-run mode for testing
 - Support for both command-line arguments and config files
 - Safe handling of different address formats (IPv4, IPv6, Tor)
 - Built-in logging to track banning activity
-- Repackaged https://github.com/Dojo-Open-Source-Project/samourai-dojo/blob/develop/docker/my-dojo/bitcoin/ban-knots.sh
+- Enhanced scripts with color-coded output and statistics
+- Originally based on [Samourai Dojo's ban-knots.sh](https://github.com/Dojo-Open-Source-Project/samourai-dojo/blob/develop/docker/my-dojo/bitcoin/ban-knots.sh)
+
+See [CREDITS.md](CREDITS.md) for full acknowledgments.
 
 ## Requirements
 
@@ -40,24 +53,32 @@ Not sure how to SSH?
 
 **Option 1: Automatic detection (Simplest)**
 ```bash
-# Automatically detects .cookie or bitcoin.conf file
-wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.1.0/standalone-ban-knots.sh && \
+# Automatically finds .cookie or bitcoin.conf
+wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.0/standalone-ban-knots.sh && \
 chmod +x standalone-ban-knots.sh && \
 ./standalone-ban-knots.sh --install-cron
+
+# With external IP banlist (optional - downloads from GitHub)
+./standalone-ban-knots.sh --external-ban-list --install-cron
 ```
+✅ **Works automatically on**: Bitcoin Core, Umbrel, RaspiBlitz, MyNode, RaspiBolt  
+❌ **Need Option 2**: Start9 (requires manual credentials)
 
 **Option 2: Manual credentials**
 ```bash
-wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.1.0/standalone-ban-knots.sh && \
+wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.0/standalone-ban-knots.sh && \
 chmod +x standalone-ban-knots.sh && \
 ./standalone-ban-knots.sh -u yourrpcuser -P yourrpcpass --install-cron
+
+# With external IP banlist (optional)
+./standalone-ban-knots.sh -u yourrpcuser -P yourrpcpass --external-ban-list --install-cron
 ```
 *Start9 users: This is your option. Get credentials from Services → Bitcoin Core → Config → RPC Settings*
 
 **Option 3: Custom config file (Usually not needed)**
 ```bash
 # Only needed if auto-detection fails or you need custom settings
-# The script already reads your bitcoin.conf automatically
+# The script already reads your bitcoin.conf automatically!
 cat > ~/.bitcoin/ban-knots.conf << EOF
 rpc_user=yourrpcuser
 rpc_password=yourrpcpass
@@ -69,13 +90,6 @@ EOF
 ./standalone-ban-knots.sh -c ~/.bitcoin/ban-knots.conf --install-cron
 ```
 
-**Option 4: One-line install on Umbrel**
-```bash
-# Use manual credentials with --umbrel flag
-wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.1.0/standalone-ban-knots.sh && \
-chmod +x standalone-ban-knots.sh && \
-./standalone-ban-knots.sh -u yourrpcuser -P yourrpcpass --umbrel --install-cron
-```
 
 That's it! The script will now run every 10 minutes automatically.
 
@@ -83,9 +97,9 @@ That's it! The script will now run every 10 minutes automatically.
 
 1. Download the script:
 ```bash
-wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.1.0/standalone-ban-knots.sh
+wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.0/standalone-ban-knots.sh
 # or
-curl -LO https://github.com/noosphere888/Ban-Knots/releases/download/v1.1.0/standalone-ban-knots.sh
+curl -LO https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.0/standalone-ban-knots.sh
 ```
 
 2. Make it executable:
@@ -135,6 +149,9 @@ For most users, the script works without any authentication parameters!
 
 # Specify custom cookie path
 ./standalone-ban-knots.sh --cookie-path /custom/path/.cookie
+
+# Enable external IP banlist (downloads from GitHub)
+./standalone-ban-knots.sh --external-ban-list
 ```
 
 ### Cron Installation (Automatic)
@@ -189,6 +206,7 @@ tail -f /tmp/ban-knots.log
 - `-d, --duration SECONDS` - Ban duration in seconds (default: 5 years)
 - `-D, --disconnect-only` - Only disconnect, don't ban
 - `-n, --dry-run` - Show what would be done without doing it
+- `-e, --external-ban-list` - Enable external IP banlist download (privacy note: downloads from GitHub)
 - `-c, --config FILE` - Read settings from config file
 - `--install-cron` - Install as cron job (runs every 10 minutes)
 - `--uninstall-cron` - Remove cron job
@@ -256,15 +274,99 @@ sudo systemctl start ban-knots.timer
 - Consider running with limited user privileges
 - Review ban list periodically
 
+### Privacy Considerations
+
+The external ban list feature (disabled by default) downloads from GitHub, which could reveal:
+- Your IP address
+- That you're running anti-Knots software
+- Your update frequency
+
+**For enhanced privacy when using --external-ban-list:**
+
+```bash
+# Option 1: Download via Tor (requires torsocks)
+torsocks ./standalone-ban-knots.sh --external-ban-list
+
+# Option 2: Use system-wide VPN
+# Configure your VPN, then run normally
+
+# Option 3: Manual download via Tor Browser
+# Download https://raw.githubusercontent.com/aeonBTC/Knots-Banlist/main/knownknots.txt
+# Save as ~/.bitcoin/knots-banlist.txt
+# Run script without -e flag
+```
+
 ## How It Works
 
-1. Connects to Bitcoin Core via RPC
-2. Retrieves all peer information
-3. Filters peers with "Knots" in their subversion string
-4. For each Knots node:
+The script uses multiple detection methods to identify Bitcoin Knots nodes:
+
+1. **User Agent Detection** - Scans for "Knots" or "bitcoinknots" in the node's subversion string
+2. **Service Flag Detection** - Checks for service flag 26 (NODE_KNOTS) which Knots nodes advertise
+3. **IP Banlist Matching** - Checks against known Knots IPs:
+   - Downloads from [aeonBTC/Knots-Banlist](https://github.com/aeonBTC/Knots-Banlist) 
+   - Adds your discoveries to the same list at `~/.bitcoin/knots-banlist.txt`
+
+For each detected Knots node:
    - Extracts the base IP address
    - Disconnects the node
-   - Optionally bans the IP address
+   - Bans the IP address (unless using --disconnect-only)
+   - **Saves the IP** to your local list for future detection
+
+### Enhanced Detection Scripts
+
+This repository now includes enhanced detection scripts that implement advanced techniques inspired by:
+- [caesrcd/gnoban](https://github.com/caesrcd/gnoban) - Service flag detection methodology
+- [aeonBTC/Knots-Banlist](https://github.com/aeonBTC/Knots-Banlist) - Historical IP tracking of known Knots nodes
+
+The enhanced scripts can detect:
+- **Standard Knots nodes** - Those using default Knots user agent
+- **Hidden Knots nodes** - Nodes that disguise their user agent but still advertise service flag 26
+- **Historical Knots IPs** - Previously identified Knots nodes that may have changed their identification
+
+#### Using Enhanced Detection
+
+Enhanced detection is built into v1.2.0+ and enabled by default. The script now automatically:
+- Detects nodes using service flag 26 (NODE_KNOTS)
+- Identifies "hidden" nodes that disguise their user agent
+- Checks against a database of known Knots IP addresses
+- Saves discovered IPs to your local list
+
+Example output showing detection and local tracking:
+```
+=== Bitcoin Knots Node Ban Script v1.2.0 ===
+Platform: Umbrel (using Docker container)
+RPC Host: 127.0.0.1:8332
+Enhanced Detection: true
+External Ban List: true
+
+Updating Knots IP banlist from upstream...
+Updated banlist: 3847 total IPs (upstream + local)
+
+Total peers: 125
+
+Found 15 Knots node(s):
+  By user agent: 8
+  By service flag: 12
+  By IP list: 3
+  Hidden nodes: 4 (flag 26 but disguised UA)
+
+Processing: 192.168.1.100:8333 (/Satoshi:28.1.0/)
+  Detection: ServiceFlag-26+HIDDEN
+  Status: Banned successfully
+  Added new discovery to banlist
+
+Current ban list summary:
+Total banned addresses: 42
+Knots IP banlist: 3862 total IPs
+Recent discoveries: 5 (see /home/user/.bitcoin/knots-banlist.txt.log)
+```
+
+The enhanced script provides:
+- Color-coded output for easy reading
+- Detection statistics summary
+- Identification of "HIDDEN" nodes (those trying to evade detection)
+- Automatic IP banlist updates from trusted sources
+- Local discovery tracking that grows over time
 
 ## Platform-Specific Guides
 
@@ -272,7 +374,7 @@ sudo systemctl start ban-knots.timer
 
 Start9 runs Bitcoin Core in a podman container. The script automatically detects this and handles it for you.
 
-**Warning**: Start9 has a read-only filesystem. The script and cron job will be removed after system updates or restarts. You'll need to reinstall after each Start9 update. For a permanent solution, consider running the scirpt from an external system that conencts to your Start9 node.
+**⚠️ Important**: Start9 has a read-only filesystem. The script and cron job will be removed after system updates or restarts. You'll need to reinstall after each Start9 update. For a permanent solution, consider running the script from an external system that connects to your Start9 node.
 
 1. **Enable SSH Access**:
    - Go to System → SSH → Add New Key
@@ -293,7 +395,7 @@ Start9 runs Bitcoin Core in a podman container. The script automatically detects
 4. **Download and Run the Script**:
    ```bash
    # Download the script
-   wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.1.0/standalone-ban-knots.sh
+   wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.0/standalone-ban-knots.sh
    chmod +x standalone-ban-knots.sh
    
    # Run with your credentials
@@ -314,7 +416,12 @@ Start9 runs Bitcoin Core in a podman container. The script automatically detects
 
 ### Umbrel Notes
 
-Umbrel users should use the `--umbrel` flag to ensure proper Docker container execution. The script will automatically handle the container communication.
+The script automatically detects Umbrel and handles Docker container execution. Most Umbrel users can simply use Option 1 above - no special flags needed!
+
+The `--umbrel` flag is only needed if:
+- Auto-detection fails (rare)
+- You're running the script from outside your Umbrel node
+- You have a non-standard Umbrel setup
 
 ## Troubleshooting
 
@@ -329,17 +436,17 @@ Umbrel users should use the `--umbrel` flag to ensure proper Docker container ex
 - **Permission denied**: Use `sudo` when running the script if needed
 - **Container not found**: Verify Bitcoin Core is running: `sudo podman ps | grep bitcoin`
 - **Test manually**: `sudo podman exec -it bitcoind.embassy bitcoin-cli getpeerinfo | grep -i knots`
-- **Script disappears after restart/update**: Start9 has a read-only filesystem. Need to reinstall after each update/restart or run from an external system:
-   ```bash
-   # From external machine with Tor installed
-   ./standalone-ban-knots.sh \
-      -h YOUR_START9_TOR_ADDRESS.onion \
-      -p 8332 \
-      -u YOUR_RPC_USERNAME \
-      -P YOUR_RPC_PASSWORD \
-      --install-cron
-   ```
-   Get your Tor address from: Servicees -> Bitcoin Core -> Interfaces -> Tor
+- **Script disappears after restart/update**: Start9 has a read-only filesystem. For persistent operation, run from an external system:
+  ```bash
+  # From external machine with Tor installed
+  ./standalone-ban-knots.sh \
+    -h YOUR_START9_TOR_ADDRESS.onion \
+    -p 8332 \
+    -u YOUR_RPC_USERNAME \
+    -P YOUR_RPC_PASSWORD \
+    --install-cron
+  ```
+  Get your Tor address from: Services → Bitcoin Core → Interfaces → Tor
 
 ### jq: command not found
 Install jq using your package manager (see Installation section)

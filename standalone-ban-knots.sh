@@ -1,8 +1,13 @@
 #!/bin/bash
 
-# Bitcoin Core Knots Node Ban Script
+# Bitcoin Core Knots Node Ban Script v1.2.0
 # This script identifies and bans/disconnects Bitcoin Knots nodes
 # Works with any Bitcoin Core node with RPC enabled
+# 
+# Detection methods:
+# 1. User agent matching (default)
+# 2. Service flag 26 detection (enhanced mode)
+# 3. Historical IP banlist (enhanced mode)
 
 # Default values
 RPC_HOST="127.0.0.1"
@@ -17,10 +22,15 @@ CRON_INTERVAL=10  # minutes
 INSTALL_CRON=false
 UNINSTALL_CRON=false
 COOKIE_PATH=""
+ENHANCED_MODE=true  # Enable service flag detection by default
+USE_EXTERNAL_BANLIST=false  # Don't download external list by default (privacy)
+BANLIST_URL="https://raw.githubusercontent.com/aeonBTC/Knots-Banlist/main/knownknots.txt"
+BANLIST_FILE="$HOME/.bitcoin/knots-banlist.txt"
 DEFAULT_COOKIE_PATHS=(
     "$HOME/.bitcoin/.cookie"
     "$HOME/Library/Application Support/Bitcoin/.cookie"
     "/var/lib/bitcoind/.cookie"
+    "$HOME/umbrel/app-data/bitcoin/data/bitcoin/.cookie"
 )
 DEFAULT_BITCOIN_CONF_PATHS=(
     "$HOME/.bitcoin/bitcoin.conf"
@@ -36,6 +46,13 @@ if [[ -f "/etc/embassy/config.yaml" ]] || [[ -d "/embassy-data" ]]; then
     # Start9 runs Bitcoin Core in a podman container
     # Don't use -it flag as it requires a TTY (breaks in cron)
     START9_CONTAINER_PREFIX="sudo podman exec bitcoind.embassy"
+fi
+
+# Detect if running on Umbrel
+IS_UMBREL=false
+UMBREL_CONTAINER_PREFIX="docker exec bitcoin_app_1"
+if uname -a | grep -qi "umbrel" ; then
+    IS_UMBREL=true
 fi
 
 # Function to display usage
@@ -55,10 +72,12 @@ Options:
     -d, --duration SECONDS    Ban duration in seconds (default: 5 years)
     -D, --disconnect-only     Only disconnect, don't ban
     -n, --dry-run            Show what would be done without doing it
+    -e, --external-ban-list  Enable external IP banlist download (privacy note: downloads from GitHub)
     -c, --config FILE        Read settings from config file
     --install-cron           Install as cron job (runs every 10 minutes)
     --uninstall-cron         Remove cron job
     --cron-interval MIN      Set cron interval in minutes (default: 10)
+    --umbrel                 Umbrel compatibility (default: auto-detect)
     -H, --help               Show this help message
 
 Config file format (one per line):
@@ -89,7 +108,7 @@ read_config() {
                 rpc_host) RPC_HOST="$value" ;;
                 rpc_port) RPC_PORT="$value" ;;
                 rpc_user) RPC_USER="$value" ;;
-                rpc_password) RPC_PASSWORD="$value" ;;
+                rpc_password) RPC_PASSWORD="$(grep "rpc_password" "$config_file" | cut -d '=' -f 2-)" ;;
                 ban_duration) BAN_DURATION="$value" ;;
                 disconnect_only) DISCONNECT_ONLY="$value" ;;
             esac
@@ -189,6 +208,10 @@ while [[ $# -gt 0 ]]; do
             DRY_RUN=true
             shift
             ;;
+        -e|--external-ban-list)
+            USE_EXTERNAL_BANLIST=true
+            shift
+            ;;
         -c|--config)
             read_config "$2"
             CONFIG_FILE="$2"
@@ -205,6 +228,10 @@ while [[ $# -gt 0 ]]; do
         --cron-interval)
             CRON_INTERVAL="$2"
             shift 2
+            ;;
+        --umbrel)
+            IS_UMBREL=true
+            shift
             ;;
         --cookie-path)
             COOKIE_PATH="$2"
@@ -278,6 +305,16 @@ if [[ "$INSTALL_CRON" == "true" ]]; then
     else
         # No explicit auth specified, script will auto-detect
         CRON_CMD="$SCRIPT_PATH"
+    fi
+    
+    # Propagate Umbrel mode, if needed - FIX: Add $ to variable
+    if [[ "$IS_UMBREL" == "true" ]]; then
+        CRON_CMD="$CRON_CMD --umbrel"
+    fi
+    
+    # Propagate external banlist flag if enabled
+    if [[ "$USE_EXTERNAL_BANLIST" == "true" ]]; then
+        CRON_CMD="$CRON_CMD --external-ban-list"
     fi
     
     # Add logging
@@ -384,6 +421,13 @@ bitcoin_cli() {
             -rpcuser="$RPC_USER" \
             -rpcpassword="$RPC_PASSWORD" \
             "$@"
+    elif [[ "$IS_UMBREL" == "true" ]]; then
+        $UMBREL_CONTAINER_PREFIX bitcoin-cli \
+            -rpcconnect="$RPC_HOST" \
+            -rpcport="$RPC_PORT" \
+            -rpcuser="$RPC_USER" \
+            -rpcpassword="$RPC_PASSWORD" \
+            "$@"
     else
         bitcoin-cli \
             -rpcconnect="$RPC_HOST" \
@@ -394,13 +438,98 @@ bitcoin_cli() {
     fi
 }
 
-echo "=== Bitcoin Knots Node Ban Script ==="
+# Enhanced detection functions
+# Service flag detection
+has_service_flag() {
+    local services=$1
+    local flag_bit=$2
+    [[ $services == 0x* ]] && services=$((services))
+    (( (services & (1 << flag_bit)) != 0 ))
+}
+
+# Update IP banlist from upstream and merge with local discoveries
+update_banlist() {
+    local need_update=false
+    local temp_file="/tmp/knots-upstream-$$.txt"
+    
+    # Create directory if needed
+    local banlist_dir=$(dirname "$BANLIST_FILE")
+    [[ ! -d "$banlist_dir" ]] && mkdir -p "$banlist_dir"
+    
+    # Only download external list if flag is set
+    if [[ "$USE_EXTERNAL_BANLIST" != true ]]; then
+        # Just create empty file if doesn't exist
+        [[ ! -f "$BANLIST_FILE" ]] && touch "$BANLIST_FILE"
+        return
+    fi
+    
+    # Check if we need to update from upstream
+    if [[ ! -f "$BANLIST_FILE" ]]; then
+        need_update=true
+    else
+        local file_age=$(( $(date +%s) - $(stat -f %m "$BANLIST_FILE" 2>/dev/null || stat -c %Y "$BANLIST_FILE" 2>/dev/null || echo 0) ))
+        if (( file_age > 604800 )); then  # 7 days
+            need_update=true
+        fi
+    fi
+    
+    if [[ "$need_update" == true ]]; then
+        echo "Updating Knots IP banlist from upstream..."
+        if curl -s "$BANLIST_URL" -o "$temp_file" 2>/dev/null || wget -q "$BANLIST_URL" -O "$temp_file" 2>/dev/null; then
+            # Merge upstream with existing local discoveries
+            if [[ -f "$BANLIST_FILE" ]]; then
+                # Extract just IPs from existing file (in case it has timestamps)
+                {
+                    cat "$temp_file"
+                    grep -E "^[0-9a-fA-F:.]+[|$]?" "$BANLIST_FILE" | cut -d'|' -f1
+                } | sort -u > "${BANLIST_FILE}.tmp"
+                mv "${BANLIST_FILE}.tmp" "$BANLIST_FILE"
+                echo "Updated banlist: $(wc -l < "$BANLIST_FILE") total IPs (upstream + local)"
+            else
+                mv "$temp_file" "$BANLIST_FILE"
+                echo "Created banlist: $(wc -l < "$BANLIST_FILE") IPs from upstream"
+            fi
+            rm -f "$temp_file"
+        else
+            echo "Failed to download upstream banlist, using existing"
+        fi
+    fi
+}
+
+# Check if IP is in banlist
+is_banned_ip() {
+    local ip=$1
+    [[ -f "$BANLIST_FILE" ]] && grep -q "^${ip}$" "$BANLIST_FILE"
+}
+
+# Add newly discovered Knots IP to banlist
+add_to_banlist() {
+    local ip=$1
+    local detection_method=$2
+    
+    # Check if IP already in banlist
+    if ! grep -q "^${ip}$" "$BANLIST_FILE"; then
+        echo "$ip" >> "$BANLIST_FILE"
+        echo "  Added new discovery to banlist"
+        
+        # Optional: Keep a log of discoveries with metadata
+        local log_file="${BANLIST_FILE}.log"
+        local timestamp=$(date -u +"%Y-%m-%d %H:%M:%S")
+        echo "${timestamp}|${ip}|${detection_method}" >> "$log_file"
+    fi
+}
+
+echo "=== Bitcoin Knots Node Ban Script v1.2.0 ==="
 if [[ "$IS_START9" == "true" ]]; then
     echo "Platform: Start9 (using podman container)"
+elif [[ "$IS_UMBREL" == "true" ]]; then
+    echo "Platform: Umbrel (using Docker container)"
 fi
 echo "RPC Host: $RPC_HOST:$RPC_PORT"
 echo "Disconnect Only: $DISCONNECT_ONLY"
 echo "Dry Run: $DRY_RUN"
+echo "Enhanced Detection: $ENHANCED_MODE"
+echo "External Ban List: $USE_EXTERNAL_BANLIST"
 echo ""
 
 # Check if we can connect to the node
@@ -413,6 +542,12 @@ fi
 echo "Successfully connected to Bitcoin node"
 echo ""
 
+# Update banlist if enhanced mode
+if [[ "$ENHANCED_MODE" == true ]]; then
+    update_banlist
+    echo ""
+fi
+
 # Get all peers
 echo "Fetching peer information..."
 PEERS_JSON=$(bitcoin_cli getpeerinfo)
@@ -422,29 +557,132 @@ if [[ -z "$PEERS_JSON" ]]; then
     exit 1
 fi
 
-# Find Knots nodes
-KNOTS_NODES=$(echo "$PEERS_JSON" | jq -r '.[] | select(.subver | contains("Knots")) | {addr: .addr, id: .id, subver: .subver}')
+# Statistics
+TOTAL_PEERS=$(echo "$PEERS_JSON" | jq 'length')
+KNOTS_BY_UA=0
+KNOTS_BY_FLAG=0
+KNOTS_BY_IP=0
+HIDDEN_KNOTS=0
+TOTAL_KNOTS=0
+
+echo "Total peers: $TOTAL_PEERS"
+echo ""
+
+# Detect Knots nodes using all methods
+KNOTS_NODES=""
+
+while IFS= read -r peer; do
+    addr=$(echo "$peer" | jq -r '.addr')
+    id=$(echo "$peer" | jq -r '.id')
+    subver=$(echo "$peer" | jq -r '.subver // ""')
+    services=$(echo "$peer" | jq -r '.services // ""')
+    
+    # Extract IP (handle IPv4, IPv6, and onion addresses)
+    if [[ "$addr" =~ ^\[([^\]]+)\]:[0-9]+$ ]]; then
+        # IPv6 format: [::1]:8333
+        base_addr="${BASH_REMATCH[1]}"
+    elif [[ "$addr" =~ ^([^:]+):[0-9]+$ ]]; then
+        # IPv4 or onion format: 1.2.3.4:8333
+        base_addr="${BASH_REMATCH[1]}"
+    else
+        # No port specified
+        base_addr="$addr"
+    fi
+    
+    is_knots=false
+    detection_methods=""
+    
+    # Method 1: User agent detection
+    if echo "$subver" | grep -qiE "(knots|bitcoinknots)"; then
+        is_knots=true
+        detection_methods="User-Agent"
+        ((KNOTS_BY_UA++))
+    fi
+    
+    # Enhanced detection methods
+    if [[ "$ENHANCED_MODE" == true ]]; then
+        # Method 2: Service flag 26 detection
+        if [[ -n "$services" ]] && has_service_flag "$services" 26; then
+            is_knots=true
+            [[ -n "$detection_methods" ]] && detection_methods="${detection_methods}+ServiceFlag-26" || detection_methods="ServiceFlag-26"
+            ((KNOTS_BY_FLAG++))
+            
+            # Check if it's a hidden node
+            if ! echo "$subver" | grep -qiE "(knots|bitcoinknots)"; then
+                detection_methods="${detection_methods}+HIDDEN"
+                ((HIDDEN_KNOTS++))
+            fi
+        fi
+        
+        # Method 3: IP banlist detection
+        if is_banned_ip "$base_addr"; then
+            is_knots=true
+            [[ -n "$detection_methods" ]] && detection_methods="${detection_methods}+Known-IP" || detection_methods="Known-IP"
+            ((KNOTS_BY_IP++))
+        fi
+    fi
+    
+    # Add to Knots nodes list if detected
+    if [[ "$is_knots" == true ]]; then
+        node_json=$(jq -n --arg addr "$addr" --arg id "$id" --arg subver "$subver" --arg detect "$detection_methods" \
+                   '{addr: $addr, id: $id, subver: $subver, detection: $detect}')
+        if [[ -z "$KNOTS_NODES" ]]; then
+            KNOTS_NODES="$node_json"
+        else
+            KNOTS_NODES="${KNOTS_NODES}\n${node_json}"
+        fi
+        ((TOTAL_KNOTS++))
+    fi
+done < <(echo "$PEERS_JSON" | jq -c '.[]')
 
 if [[ -z "$KNOTS_NODES" ]]; then
     echo "No Knots nodes found among current peers"
+    if [[ "$ENHANCED_MODE" == true ]]; then
+        echo ""
+        echo "Detection summary:"
+        echo "  Checked with user agent: $TOTAL_PEERS peers"
+        echo "  Checked with service flag 26: $TOTAL_PEERS peers"
+        echo "  Checked against IP banlist: $(wc -l < "$BANLIST_FILE" 2>/dev/null || echo 0) IPs"
+    fi
     exit 0
 fi
 
-# Count Knots nodes
-KNOTS_COUNT=$(echo "$KNOTS_NODES" | jq -s 'length')
-echo "Found $KNOTS_COUNT Knots node(s)"
+# Summary
+echo "Found $TOTAL_KNOTS Knots node(s):"
+if [[ "$ENHANCED_MODE" == true ]]; then
+    echo "  By user agent: $KNOTS_BY_UA"
+    echo "  By service flag: $KNOTS_BY_FLAG"
+    echo "  By IP list: $KNOTS_BY_IP"
+    [[ $HIDDEN_KNOTS -gt 0 ]] && echo "  Hidden nodes: $HIDDEN_KNOTS (flag 26 but disguised UA)"
+fi
 echo ""
 
 # Process each Knots node
-echo "$KNOTS_NODES" | jq -c '.' | while read -r node; do
-    addr=$(echo "$node" | jq -r '.addr')
-    id=$(echo "$node" | jq -r '.id')
-    subver=$(echo "$node" | jq -r '.subver')
+echo -e "$KNOTS_NODES" | while IFS= read -r node_json; do
+    [[ -z "$node_json" ]] && continue
+    
+    addr=$(echo "$node_json" | jq -r '.addr')
+    id=$(echo "$node_json" | jq -r '.id')
+    subver=$(echo "$node_json" | jq -r '.subver')
+    detection=$(echo "$node_json" | jq -r '.detection')
     
     # Extract IP address (remove port)
-    base_addr=$(echo "$addr" | sed 's/:.*//' | sed 's/\[//g' | sed 's/\]//g')
+    # Extract IP (handle IPv4, IPv6, and onion addresses)
+    if [[ "$addr" =~ ^\[([^\]]+)\]:[0-9]+$ ]]; then
+        # IPv6 format: [::1]:8333
+        base_addr="${BASH_REMATCH[1]}"
+    elif [[ "$addr" =~ ^([^:]+):[0-9]+$ ]]; then
+        # IPv4 or onion format: 1.2.3.4:8333
+        base_addr="${BASH_REMATCH[1]}"
+    else
+        # No port specified
+        base_addr="$addr"
+    fi
     
     echo "Processing: $addr ($subver)"
+    if [[ "$ENHANCED_MODE" == true ]]; then
+        echo "  Detection: $detection"
+    fi
     
     if [[ "$DISCONNECT_ONLY" == "true" ]]; then
         # Just disconnect
@@ -470,6 +708,8 @@ echo "$KNOTS_NODES" | jq -c '.' | while read -r node; do
             # Then ban
             if bitcoin_cli setban "$base_addr" "add" "$BAN_DURATION" 2>/dev/null; then
                 echo "  Status: Banned successfully"
+                # Add to local discovered list
+                add_to_banlist "$base_addr" "$detection"
             else
                 echo "  Status: Failed to ban (may already be banned)"
             fi
@@ -485,6 +725,18 @@ if [[ "$DISCONNECT_ONLY" == "false" && "$DRY_RUN" == "false" ]]; then
     echo "Current ban list summary:"
     BAN_COUNT=$(bitcoin_cli listbanned | jq 'length')
     echo "Total banned addresses: $BAN_COUNT"
+    
+    # Show banlist info
+    if [[ -f "$BANLIST_FILE" ]]; then
+        BANLIST_COUNT=$(wc -l < "$BANLIST_FILE" | tr -d ' ')
+        echo "Knots IP banlist: $BANLIST_COUNT total IPs"
+        
+        # Show recent discoveries if log exists
+        if [[ -f "${BANLIST_FILE}.log" ]]; then
+            RECENT_DISCOVERIES=$(tail -5 "${BANLIST_FILE}.log" | wc -l | tr -d ' ')
+            echo "Recent discoveries: $RECENT_DISCOVERIES (see ${BANLIST_FILE}.log)"
+        fi
+    fi
 fi
 
 echo "Script completed"
