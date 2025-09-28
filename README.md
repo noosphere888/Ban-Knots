@@ -12,9 +12,7 @@ Bitcoin Knots implements restrictive transaction relay policies that can interfe
 - Works with any Bitcoin Core node with RPC enabled
 - **Multiple detection methods**:
   - Automatic detection of Knots nodes via subversion string
-  - Service flag 26 (NODE_KNOTS) detection for hidden nodes (inspired by [gnoban](https://github.com/caesrcd/gnoban))
   - Historical IP banlist - maintains your own local list + optional download from [aeonBTC/Knots-Banlist](https://github.com/aeonBTC/Knots-Banlist)
-- Detection of "hidden" Knots nodes that disguise their user agent
 - **Local discovery tracking** - saves found Knots node IPs for future runs
 - **Privacy-focused** - external banlist disabled by default
 - Option to ban or just disconnect nodes
@@ -54,7 +52,7 @@ Not sure how to SSH?
 **Option 1: Automatic detection (Simplest)**
 ```bash
 # Automatically finds .cookie or bitcoin.conf
-wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.0/standalone-ban-knots.sh && \
+wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.1/standalone-ban-knots.sh && \
 chmod +x standalone-ban-knots.sh && \
 ./standalone-ban-knots.sh --install-cron
 
@@ -66,7 +64,7 @@ chmod +x standalone-ban-knots.sh && \
 
 **Option 2: Manual credentials**
 ```bash
-wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.0/standalone-ban-knots.sh && \
+wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.1/standalone-ban-knots.sh && \
 chmod +x standalone-ban-knots.sh && \
 ./standalone-ban-knots.sh -u yourrpcuser -P yourrpcpass --install-cron
 
@@ -97,9 +95,9 @@ That's it! The script will now run every 10 minutes automatically.
 
 1. Download the script:
 ```bash
-wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.0/standalone-ban-knots.sh
+wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.1/standalone-ban-knots.sh
 # or
-curl -LO https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.0/standalone-ban-knots.sh
+curl -LO https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.1/standalone-ban-knots.sh
 ```
 
 2. Make it executable:
@@ -301,8 +299,7 @@ torsocks ./standalone-ban-knots.sh --external-ban-list
 The script uses multiple detection methods to identify Bitcoin Knots nodes:
 
 1. **User Agent Detection** - Scans for "Knots" or "bitcoinknots" in the node's subversion string
-2. **Service Flag Detection** - Checks for service flag 26 (NODE_KNOTS) which Knots nodes advertise
-3. **IP Banlist Matching** - Checks against known Knots IPs:
+2. **IP Banlist Matching** - Checks against known Knots IPs:
    - Downloads from [aeonBTC/Knots-Banlist](https://github.com/aeonBTC/Knots-Banlist) 
    - Adds your discoveries to the same list at `~/.bitcoin/knots-banlist.txt`
 
@@ -312,31 +309,17 @@ For each detected Knots node:
    - Bans the IP address (unless using --disconnect-only)
    - **Saves the IP** to your local list for future detection
 
-### Enhanced Detection Scripts
+### IP Tracking and Local Discovery
 
-This repository now includes enhanced detection scripts that implement advanced techniques inspired by:
-- [caesrcd/gnoban](https://github.com/caesrcd/gnoban) - Service flag detection methodology
-- [aeonBTC/Knots-Banlist](https://github.com/aeonBTC/Knots-Banlist) - Historical IP tracking of known Knots nodes
+The script maintains a local database of discovered Knots nodes at `~/.bitcoin/knots-banlist.txt`. This helps catch nodes that may change their user agent in the future. When the external banlist option is enabled, it combines:
+- [aeonBTC/Knots-Banlist](https://github.com/aeonBTC/Knots-Banlist) - Community-maintained list of known Knots IPs
+- Your local discoveries - IPs you've encountered and banned
 
-The enhanced scripts can detect:
-- **Standard Knots nodes** - Those using default Knots user agent
-- **Hidden Knots nodes** - Nodes that disguise their user agent but still advertise service flag 26
-- **Historical Knots IPs** - Previously identified Knots nodes that may have changed their identification
-
-#### Using Enhanced Detection
-
-Enhanced detection is built into v1.2.0+ and enabled by default. The script now automatically:
-- Detects nodes using service flag 26 (NODE_KNOTS)
-- Identifies "hidden" nodes that disguise their user agent
-- Checks against a database of known Knots IP addresses
-- Saves discovered IPs to your local list
-
-Example output showing detection and local tracking:
+Example output:
 ```
-=== Bitcoin Knots Node Ban Script v1.2.0 ===
+=== Bitcoin Knots Node Ban Script v1.2.1 ===
 Platform: Umbrel (using Docker container)
 RPC Host: 127.0.0.1:8332
-Enhanced Detection: true
 External Ban List: true
 
 Updating Knots IP banlist from upstream...
@@ -344,28 +327,25 @@ Updated banlist: 3847 total IPs (upstream + local)
 
 Total peers: 125
 
-Found 15 Knots node(s):
+Found 11 Knots node(s):
   By user agent: 8
-  By service flag: 12
   By IP list: 3
-  Hidden nodes: 4 (flag 26 but disguised UA)
 
-Processing: 192.168.1.100:8333 (/Satoshi:28.1.0/)
-  Detection: ServiceFlag-26+HIDDEN
+Processing: 192.168.1.100:8333 (/Satoshi:28.1.0/Knots:20240801/)
+  Detection: User-Agent
   Status: Banned successfully
   Added new discovery to banlist
 
 Current ban list summary:
-Total banned addresses: 42
-Knots IP banlist: 3862 total IPs
+Total banned addresses: 38
+Knots IP banlist: 3848 total IPs
 Recent discoveries: 5 (see /home/user/.bitcoin/knots-banlist.txt.log)
 ```
 
-The enhanced script provides:
+The script provides:
 - Color-coded output for easy reading
 - Detection statistics summary
-- Identification of "HIDDEN" nodes (those trying to evade detection)
-- Automatic IP banlist updates from trusted sources
+- Automatic IP banlist updates from trusted sources (when enabled)
 - Local discovery tracking that grows over time
 
 ## Platform-Specific Guides
@@ -395,7 +375,7 @@ Start9 runs Bitcoin Core in a podman container. The script automatically detects
 4. **Download and Run the Script**:
    ```bash
    # Download the script
-   wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.0/standalone-ban-knots.sh
+   wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.1/standalone-ban-knots.sh
    chmod +x standalone-ban-knots.sh
    
    # Run with your credentials
