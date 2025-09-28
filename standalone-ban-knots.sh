@@ -3,7 +3,7 @@
 # Bitcoin Core Knots Node Ban Script v1.2.0
 # This script identifies and bans/disconnects Bitcoin Knots nodes
 # Works with any Bitcoin Core node with RPC enabled
-# 
+#
 # Detection methods:
 # 1. User agent matching (default)
 # 2. Service flag 26 detection (enhanced mode)
@@ -163,7 +163,7 @@ parse_bitcoin_conf() {
                 rpcuser) RPC_USER="$value" ;;
                 rpcpassword) RPC_PASSWORD="$value" ;;
                 rpcport) RPC_PORT="${value:-8332}" ;;
-                rpcbind|rpcconnect) 
+                rpcbind|rpcconnect)
                     # Extract just the IP, ignore port if present
                     RPC_HOST=$(echo "$value" | cut -d':' -f1)
                     ;;
@@ -259,7 +259,7 @@ if [[ "$INSTALL_CRON" == "true" ]]; then
     # For cron installation, we just need to ensure the script can authenticate somehow
     # It will use the same auth discovery when it runs
     NEEDS_CREDS=false
-    
+
     # Check if manual credentials provided
     if [[ -n "$RPC_USER" && -n "$RPC_PASSWORD" ]]; then
         NEEDS_CREDS=false
@@ -278,7 +278,7 @@ if [[ "$INSTALL_CRON" == "true" ]]; then
     else
         NEEDS_CREDS=true
     fi
-    
+
     if [[ "$NEEDS_CREDS" == "true" ]]; then
         echo "Error: No authentication method available for cron installation"
         echo "Please ensure one of the following:"
@@ -288,9 +288,9 @@ if [[ "$INSTALL_CRON" == "true" ]]; then
         echo "  - Specify a config file with -c"
         exit 1
     fi
-    
+
     SCRIPT_PATH=$(realpath "$0")
-    
+
     # Build cron command
     if [[ -n "$CONFIG_FILE" ]]; then
         CONFIG_PATH=$(realpath "$CONFIG_FILE")
@@ -306,33 +306,33 @@ if [[ "$INSTALL_CRON" == "true" ]]; then
         # No explicit auth specified, script will auto-detect
         CRON_CMD="$SCRIPT_PATH"
     fi
-    
+
     # Propagate Umbrel mode, if needed - FIX: Add $ to variable
     if [[ "$IS_UMBREL" == "true" ]]; then
         CRON_CMD="$CRON_CMD --umbrel"
     fi
-    
+
     # Propagate external banlist flag if enabled
     if [[ "$USE_EXTERNAL_BANLIST" == "true" ]]; then
         CRON_CMD="$CRON_CMD --external-ban-list"
     fi
-    
+
     # Add logging
     CRON_CMD="$CRON_CMD >> /tmp/ban-knots.log 2>&1"
-    
+
     # Install cron job
     echo "Installing cron job to run every $CRON_INTERVAL minutes..."
-    
+
     # Remove existing entries to avoid duplicates
     crontab -l 2>/dev/null | grep -v "standalone-ban-knots.sh" > /tmp/cron_temp
-    
+
     # Add new entry
     echo "*/$CRON_INTERVAL * * * * $CRON_CMD" >> /tmp/cron_temp
-    
+
     # Install new crontab
     crontab /tmp/cron_temp
     rm /tmp/cron_temp
-    
+
     echo "Cron job installed successfully!"
     echo "Command: $CRON_CMD"
     echo "Check logs at: /tmp/ban-knots.log"
@@ -365,7 +365,7 @@ fi
 # Authentication flow - try multiple methods in order
 if [[ -z "$RPC_USER" || -z "$RPC_PASSWORD" ]]; then
     echo "No manual credentials provided, trying auto-detection..."
-    
+
     # 1. Try specified cookie path
     if [[ -n "$COOKIE_PATH" ]]; then
         echo "Trying specified cookie file: $COOKIE_PATH"
@@ -375,7 +375,7 @@ if [[ -z "$RPC_USER" || -z "$RPC_PASSWORD" ]]; then
             echo "Error: Cannot read cookie file: $COOKIE_PATH"
             exit 1
         fi
-    
+
     # 2. Try finding cookie in default locations
     elif FOUND_COOKIE=$(find_cookie_file); then
         echo "Found cookie file: $FOUND_COOKIE"
@@ -385,7 +385,7 @@ if [[ -z "$RPC_USER" || -z "$RPC_PASSWORD" ]]; then
             echo "Error: Cannot read cookie file: $FOUND_COOKIE"
             exit 1
         fi
-    
+
     # 3. Try bitcoin.conf
     elif FOUND_CONF=$(find_bitcoin_conf); then
         echo "Found bitcoin.conf: $FOUND_CONF"
@@ -395,7 +395,7 @@ if [[ -z "$RPC_USER" || -z "$RPC_PASSWORD" ]]; then
             echo "Error: No RPC credentials found in bitcoin.conf"
             exit 1
         fi
-    
+
     # 4. Error - no auth method available
     else
         echo "Error: No authentication method available"
@@ -412,7 +412,7 @@ fi
 # Function to execute bitcoin-cli commands
 bitcoin_cli() {
     local cmd="bitcoin-cli"
-    
+
     # Use container execution for Start9
     if [[ "$IS_START9" == "true" ]]; then
         $START9_CONTAINER_PREFIX bitcoin-cli \
@@ -439,30 +439,51 @@ bitcoin_cli() {
 }
 
 # Enhanced detection functions
-# Service flag detection
+# Service flag detection (hex/dec safe conversion)
 has_service_flag() {
-    local services=$1
-    local flag_bit=$2
-    [[ $services == 0x* ]] && services=$((services))
-    (( (services & (1 << flag_bit)) != 0 ))
+    local services_str="$1"
+    local flag_bit="$2"
+
+    # Remove 0x/0X prefix
+    services_str="${services_str#0x}"
+    services_str="${services_str#0X}"
+
+    # Empty => no flags
+    if [[ -z "$services_str" ]]; then
+        return 1
+    fi
+
+    local services_val=0
+    if [[ "$services_str" =~ ^[0-9A-Fa-f]+$ ]]; then
+        # Hex from Bitcoin Core
+        services_val=$((16#$services_str))
+    elif [[ "$services_str" =~ ^[0-9]+$ ]]; then
+        # Force base 10
+        services_val=$((10#$services_str))
+    else
+        # Uncertain - parse as hex
+        services_val=$((16#$services_str))
+    fi
+
+    (( (services_val & (1 << flag_bit)) != 0 ))
 }
 
 # Update IP banlist from upstream and merge with local discoveries
 update_banlist() {
     local need_update=false
     local temp_file="/tmp/knots-upstream-$$.txt"
-    
+
     # Create directory if needed
     local banlist_dir=$(dirname "$BANLIST_FILE")
     [[ ! -d "$banlist_dir" ]] && mkdir -p "$banlist_dir"
-    
+
     # Only download external list if flag is set
     if [[ "$USE_EXTERNAL_BANLIST" != true ]]; then
         # Just create empty file if doesn't exist
         [[ ! -f "$BANLIST_FILE" ]] && touch "$BANLIST_FILE"
         return
     fi
-    
+
     # Check if we need to update from upstream
     if [[ ! -f "$BANLIST_FILE" ]]; then
         need_update=true
@@ -472,7 +493,7 @@ update_banlist() {
             need_update=true
         fi
     fi
-    
+
     if [[ "$need_update" == true ]]; then
         echo "Updating Knots IP banlist from upstream..."
         if curl -s "$BANLIST_URL" -o "$temp_file" 2>/dev/null || wget -q "$BANLIST_URL" -O "$temp_file" 2>/dev/null; then
@@ -506,12 +527,12 @@ is_banned_ip() {
 add_to_banlist() {
     local ip=$1
     local detection_method=$2
-    
+
     # Check if IP already in banlist
     if ! grep -q "^${ip}$" "$BANLIST_FILE"; then
         echo "$ip" >> "$BANLIST_FILE"
         echo "  Added new discovery to banlist"
-        
+
         # Optional: Keep a log of discoveries with metadata
         local log_file="${BANLIST_FILE}.log"
         local timestamp=$(date -u +"%Y-%m-%d %H:%M:%S")
@@ -569,14 +590,14 @@ echo "Total peers: $TOTAL_PEERS"
 echo ""
 
 # Detect Knots nodes using all methods
-KNOTS_NODES=""
+declare -a KNOTS_NODES=()
 
 while IFS= read -r peer; do
     addr=$(echo "$peer" | jq -r '.addr')
     id=$(echo "$peer" | jq -r '.id')
     subver=$(echo "$peer" | jq -r '.subver // ""')
     services=$(echo "$peer" | jq -r '.services // ""')
-    
+
     # Extract IP (handle IPv4, IPv6, and onion addresses)
     if [[ "$addr" =~ ^\[([^\]]+)\]:[0-9]+$ ]]; then
         # IPv6 format: [::1]:8333
@@ -588,17 +609,17 @@ while IFS= read -r peer; do
         # No port specified
         base_addr="$addr"
     fi
-    
+
     is_knots=false
     detection_methods=""
-    
+
     # Method 1: User agent detection
     if echo "$subver" | grep -qiE "(knots|bitcoinknots)"; then
         is_knots=true
         detection_methods="User-Agent"
         ((KNOTS_BY_UA++))
     fi
-    
+
     # Enhanced detection methods
     if [[ "$ENHANCED_MODE" == true ]]; then
         # Method 2: Service flag 26 detection
@@ -606,14 +627,14 @@ while IFS= read -r peer; do
             is_knots=true
             [[ -n "$detection_methods" ]] && detection_methods="${detection_methods}+ServiceFlag-26" || detection_methods="ServiceFlag-26"
             ((KNOTS_BY_FLAG++))
-            
+
             # Check if it's a hidden node
             if ! echo "$subver" | grep -qiE "(knots|bitcoinknots)"; then
                 detection_methods="${detection_methods}+HIDDEN"
                 ((HIDDEN_KNOTS++))
             fi
         fi
-        
+
         # Method 3: IP banlist detection
         if is_banned_ip "$base_addr"; then
             is_knots=true
@@ -621,7 +642,7 @@ while IFS= read -r peer; do
             ((KNOTS_BY_IP++))
         fi
     fi
-    
+
     # Add to Knots nodes list if detected
     if [[ "$is_knots" == true ]]; then
         node_json=$(jq -n --arg addr "$addr" --arg id "$id" --arg subver "$subver" --arg detect "$detection_methods" \
@@ -629,7 +650,7 @@ while IFS= read -r peer; do
         if [[ -z "$KNOTS_NODES" ]]; then
             KNOTS_NODES="$node_json"
         else
-            KNOTS_NODES="${KNOTS_NODES}\n${node_json}"
+            KNOTS_NODES+=("$node_json")
         fi
         ((TOTAL_KNOTS++))
     fi
@@ -658,14 +679,14 @@ fi
 echo ""
 
 # Process each Knots node
-echo -e "$KNOTS_NODES" | while IFS= read -r node_json; do
+for node_json in "${KNOTS_NODES[@]}"; do
     [[ -z "$node_json" ]] && continue
-    
-    addr=$(echo "$node_json" | jq -r '.addr')
-    id=$(echo "$node_json" | jq -r '.id')
-    subver=$(echo "$node_json" | jq -r '.subver')
-    detection=$(echo "$node_json" | jq -r '.detection')
-    
+
+    addr=$(jq -r '.addr' <<<"$node_json")
+    id=$(jq -r '.id' <<<"$node_json")
+    subver=$(jq -r '.subver' <<<"$node_json")
+    detection=$(jq -r '.detection' <<<"$node_json")
+
     # Extract IP address (remove port)
     # Extract IP (handle IPv4, IPv6, and onion addresses)
     if [[ "$addr" =~ ^\[([^\]]+)\]:[0-9]+$ ]]; then
@@ -678,12 +699,12 @@ echo -e "$KNOTS_NODES" | while IFS= read -r node_json; do
         # No port specified
         base_addr="$addr"
     fi
-    
+
     echo "Processing: $addr ($subver)"
     if [[ "$ENHANCED_MODE" == true ]]; then
         echo "  Detection: $detection"
     fi
-    
+
     if [[ "$DISCONNECT_ONLY" == "true" ]]; then
         # Just disconnect
         echo "  Action: Disconnect (ID: $id)"
@@ -700,11 +721,11 @@ echo -e "$KNOTS_NODES" | while IFS= read -r node_json; do
         # Disconnect and ban
         echo "  Action: Disconnect and Ban"
         echo "  Ban Duration: $BAN_DURATION seconds"
-        
+
         if [[ "$DRY_RUN" == "false" ]]; then
             # First disconnect
             bitcoin_cli disconnectnode "" "$id" 2>/dev/null
-            
+
             # Then ban
             if bitcoin_cli setban "$base_addr" "add" "$BAN_DURATION" 2>/dev/null; then
                 echo "  Status: Banned successfully"
@@ -725,12 +746,12 @@ if [[ "$DISCONNECT_ONLY" == "false" && "$DRY_RUN" == "false" ]]; then
     echo "Current ban list summary:"
     BAN_COUNT=$(bitcoin_cli listbanned | jq 'length')
     echo "Total banned addresses: $BAN_COUNT"
-    
+
     # Show banlist info
     if [[ -f "$BANLIST_FILE" ]]; then
         BANLIST_COUNT=$(wc -l < "$BANLIST_FILE" | tr -d ' ')
         echo "Knots IP banlist: $BANLIST_COUNT total IPs"
-        
+
         # Show recent discoveries if log exists
         if [[ -f "${BANLIST_FILE}.log" ]]; then
             RECENT_DISCOVERIES=$(tail -5 "${BANLIST_FILE}.log" | wc -l | tr -d ' ')
