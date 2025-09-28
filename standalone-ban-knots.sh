@@ -179,22 +179,42 @@ parse_bitcoin_conf() {
 while [[ $# -gt 0 ]]; do
     case $1 in
         -h|--host)
+            if [[ -z "$2" || "$2" =~ ^- ]]; then
+                echo "Error: --host requires an argument"
+                usage
+            fi
             RPC_HOST="$2"
             shift 2
             ;;
         -p|--port)
+            if [[ -z "$2" || "$2" =~ ^- ]]; then
+                echo "Error: --port requires an argument"
+                usage
+            fi
             RPC_PORT="$2"
             shift 2
             ;;
         -u|--user)
+            if [[ -z "$2" || "$2" =~ ^- ]]; then
+                echo "Error: --user requires an argument"
+                usage
+            fi
             RPC_USER="$2"
             shift 2
             ;;
         -P|--password)
+            if [[ -z "$2" || "$2" =~ ^- ]]; then
+                echo "Error: --password requires an argument"
+                usage
+            fi
             RPC_PASSWORD="$2"
             shift 2
             ;;
         -d|--duration)
+            if [[ -z "$2" || "$2" =~ ^- ]]; then
+                echo "Error: --duration requires an argument"
+                usage
+            fi
             BAN_DURATION="$2"
             shift 2
             ;;

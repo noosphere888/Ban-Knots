@@ -13,6 +13,10 @@ This project builds upon and incorporates ideas from several excellent Bitcoin n
   - Contribution: Historical database of known Knots node IPs
   - Provides crowd-sourced IP lists from bitnodes.io snapshots
 
+## Contributors
+- [@TMan253](https://github.com/TMan253)
+- [@Rav3nPL](https://github.com/Rav3nPL)
+
 ## Community
 Thanks to the Bitcoin community for ongoing discussions about network health, transaction relay policies, and node diversity.
 
