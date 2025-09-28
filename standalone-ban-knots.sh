@@ -181,6 +181,11 @@ parse_bitcoin_conf() {
 while [[ $# -gt 0 ]]; do
     case $1 in
         -h|--host)
+            # no second parameter or another flag
+            if [[ -z "${2:-}" || "$2" == -* ]]; then
+                echo "Error: -h|--host needs agrument" >&2
+                usage
+            fi
             RPC_HOST="$2"
             shift 2
             ;;
