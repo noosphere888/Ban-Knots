@@ -1,13 +1,12 @@
 #!/bin/bash
 
-# Bitcoin Core Knots Node Ban Script v1.2.0
+# Bitcoin Core Knots Node Ban Script v1.2.1
 # This script identifies and bans/disconnects Bitcoin Knots nodes
 # Works with any Bitcoin Core node with RPC enabled
 # 
 # Detection methods:
 # 1. User agent matching (default)
-# 2. Service flag 26 detection (enhanced mode)
-# 3. Historical IP banlist (enhanced mode)
+# 2. Historical IP banlist (optional)
 
 # Default values
 RPC_HOST="127.0.0.1"
@@ -22,7 +21,6 @@ CRON_INTERVAL=10  # minutes
 INSTALL_CRON=false
 UNINSTALL_CRON=false
 COOKIE_PATH=""
-ENHANCED_MODE=true  # Enable service flag detection by default
 USE_EXTERNAL_BANLIST=false  # Don't download external list by default (privacy)
 BANLIST_URL="https://raw.githubusercontent.com/aeonBTC/Knots-Banlist/main/knownknots.txt"
 BANLIST_FILE="$HOME/.bitcoin/knots-banlist.txt"
@@ -438,15 +436,6 @@ bitcoin_cli() {
     fi
 }
 
-# Enhanced detection functions
-# Service flag detection
-has_service_flag() {
-    local services=$1
-    local flag_bit=$2
-    [[ $services == 0x* ]] && services=$((services))
-    (( (services & (1 << flag_bit)) != 0 ))
-}
-
 # Update IP banlist from upstream and merge with local discoveries
 update_banlist() {
     local need_update=false
@@ -519,7 +508,7 @@ add_to_banlist() {
     fi
 }
 
-echo "=== Bitcoin Knots Node Ban Script v1.2.0 ==="
+echo "=== Bitcoin Knots Node Ban Script v1.2.1 ==="
 if [[ "$IS_START9" == "true" ]]; then
     echo "Platform: Start9 (using podman container)"
 elif [[ "$IS_UMBREL" == "true" ]]; then
@@ -528,7 +517,6 @@ fi
 echo "RPC Host: $RPC_HOST:$RPC_PORT"
 echo "Disconnect Only: $DISCONNECT_ONLY"
 echo "Dry Run: $DRY_RUN"
-echo "Enhanced Detection: $ENHANCED_MODE"
 echo "External Ban List: $USE_EXTERNAL_BANLIST"
 echo ""
 
@@ -542,11 +530,9 @@ fi
 echo "Successfully connected to Bitcoin node"
 echo ""
 
-# Update banlist if enhanced mode
-if [[ "$ENHANCED_MODE" == true ]]; then
-    update_banlist
-    echo ""
-fi
+# Update banlist if using external list
+update_banlist
+echo ""
 
 # Get all peers
 echo "Fetching peer information..."
@@ -560,9 +546,7 @@ fi
 # Statistics
 TOTAL_PEERS=$(echo "$PEERS_JSON" | jq 'length')
 KNOTS_BY_UA=0
-KNOTS_BY_FLAG=0
 KNOTS_BY_IP=0
-HIDDEN_KNOTS=0
 TOTAL_KNOTS=0
 
 echo "Total peers: $TOTAL_PEERS"
@@ -599,27 +583,11 @@ while IFS= read -r peer; do
         ((KNOTS_BY_UA++))
     fi
     
-    # Enhanced detection methods
-    if [[ "$ENHANCED_MODE" == true ]]; then
-        # Method 2: Service flag 26 detection
-        if [[ -n "$services" ]] && has_service_flag "$services" 26; then
-            is_knots=true
-            [[ -n "$detection_methods" ]] && detection_methods="${detection_methods}+ServiceFlag-26" || detection_methods="ServiceFlag-26"
-            ((KNOTS_BY_FLAG++))
-            
-            # Check if it's a hidden node
-            if ! echo "$subver" | grep -qiE "(knots|bitcoinknots)"; then
-                detection_methods="${detection_methods}+HIDDEN"
-                ((HIDDEN_KNOTS++))
-            fi
-        fi
-        
-        # Method 3: IP banlist detection
-        if is_banned_ip "$base_addr"; then
-            is_knots=true
-            [[ -n "$detection_methods" ]] && detection_methods="${detection_methods}+Known-IP" || detection_methods="Known-IP"
-            ((KNOTS_BY_IP++))
-        fi
+    # Method 2: IP banlist detection (if using external list)
+    if [[ "$USE_EXTERNAL_BANLIST" == true ]] && is_banned_ip "$base_addr"; then
+        is_knots=true
+        [[ -n "$detection_methods" ]] && detection_methods="${detection_methods}+Known-IP" || detection_methods="Known-IP"
+        ((KNOTS_BY_IP++))
     fi
     
     # Add to Knots nodes list if detected
@@ -637,11 +605,10 @@ done < <(echo "$PEERS_JSON" | jq -c '.[]')
 
 if [[ -z "$KNOTS_NODES" ]]; then
     echo "No Knots nodes found among current peers"
-    if [[ "$ENHANCED_MODE" == true ]]; then
-        echo ""
-        echo "Detection summary:"
-        echo "  Checked with user agent: $TOTAL_PEERS peers"
-        echo "  Checked with service flag 26: $TOTAL_PEERS peers"
+    echo ""
+    echo "Detection summary:"
+    echo "  Checked with user agent: $TOTAL_PEERS peers"
+    if [[ "$USE_EXTERNAL_BANLIST" == true ]]; then
         echo "  Checked against IP banlist: $(wc -l < "$BANLIST_FILE" 2>/dev/null || echo 0) IPs"
     fi
     exit 0
@@ -649,11 +616,9 @@ fi
 
 # Summary
 echo "Found $TOTAL_KNOTS Knots node(s):"
-if [[ "$ENHANCED_MODE" == true ]]; then
-    echo "  By user agent: $KNOTS_BY_UA"
-    echo "  By service flag: $KNOTS_BY_FLAG"
+echo "  By user agent: $KNOTS_BY_UA"
+if [[ "$USE_EXTERNAL_BANLIST" == true ]]; then
     echo "  By IP list: $KNOTS_BY_IP"
-    [[ $HIDDEN_KNOTS -gt 0 ]] && echo "  Hidden nodes: $HIDDEN_KNOTS (flag 26 but disguised UA)"
 fi
 echo ""
 
@@ -680,9 +645,7 @@ echo -e "$KNOTS_NODES" | while IFS= read -r node_json; do
     fi
     
     echo "Processing: $addr ($subver)"
-    if [[ "$ENHANCED_MODE" == true ]]; then
-        echo "  Detection: $detection"
-    fi
+    echo "  Detection: $detection"
     
     if [[ "$DISCONNECT_ONLY" == "true" ]]; then
         # Just disconnect
