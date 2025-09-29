@@ -52,7 +52,7 @@ Not sure how to SSH?
 **Option 1: Automatic detection (Simplest)**
 ```bash
 # Automatically finds .cookie or bitcoin.conf
-wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.1/standalone-ban-knots.sh && \
+wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.2/standalone-ban-knots.sh && \
 chmod +x standalone-ban-knots.sh && \
 ./standalone-ban-knots.sh --install-cron
 
@@ -64,7 +64,7 @@ chmod +x standalone-ban-knots.sh && \
 
 **Option 2: Manual credentials**
 ```bash
-wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.1/standalone-ban-knots.sh && \
+wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.2/standalone-ban-knots.sh && \
 chmod +x standalone-ban-knots.sh && \
 ./standalone-ban-knots.sh -u yourrpcuser -P yourrpcpass --install-cron
 
@@ -95,9 +95,9 @@ That's it! The script will now run every 10 minutes automatically.
 
 1. Download the script:
 ```bash
-wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.1/standalone-ban-knots.sh
+wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.2/standalone-ban-knots.sh
 # or
-curl -LO https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.1/standalone-ban-knots.sh
+curl -LO https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.2/standalone-ban-knots.sh
 ```
 
 2. Make it executable:
@@ -317,7 +317,7 @@ The script maintains a local database of discovered Knots nodes at `~/.bitcoin/k
 
 Example output:
 ```
-=== Bitcoin Knots Node Ban Script v1.2.1 ===
+=== Bitcoin Knots Node Ban Script v1.2.2 ===
 Platform: Umbrel (using Docker container)
 RPC Host: 127.0.0.1:8332
 External Ban List: true
@@ -375,7 +375,7 @@ Start9 runs Bitcoin Core in a podman container. The script automatically detects
 4. **Download and Run the Script**:
    ```bash
    # Download the script
-   wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.1/standalone-ban-knots.sh
+   wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.2/standalone-ban-knots.sh
    chmod +x standalone-ban-knots.sh
    
    # Run with your credentials

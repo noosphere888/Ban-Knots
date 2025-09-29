@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Bitcoin Core Knots Node Ban Script v1.2.1
+# Bitcoin Core Knots Node Ban Script v1.2.2
 # This script identifies and bans/disconnects Bitcoin Knots nodes
 # Works with any Bitcoin Core node with RPC enabled
 # 
@@ -325,7 +325,7 @@ if [[ "$INSTALL_CRON" == "true" ]]; then
         CRON_CMD="$SCRIPT_PATH"
     fi
     
-    # Propagate Umbrel mode, if needed - FIX: Add $ to variable
+    # Propagate Umbrel mode, if needed
     if [[ "$IS_UMBREL" == "true" ]]; then
         CRON_CMD="$CRON_CMD --umbrel"
     fi
@@ -528,7 +528,7 @@ add_to_banlist() {
     fi
 }
 
-echo "=== Bitcoin Knots Node Ban Script v1.2.1 ==="
+echo "=== Bitcoin Knots Node Ban Script v1.2.2 ==="
 if [[ "$IS_START9" == "true" ]]; then
     echo "Platform: Start9 (using podman container)"
 elif [[ "$IS_UMBREL" == "true" ]]; then
@@ -573,7 +573,7 @@ echo "Total peers: $TOTAL_PEERS"
 echo ""
 
 # Detect Knots nodes using all methods
-KNOTS_NODES=""
+KNOTS_NODES_ARRAY=()
 
 while IFS= read -r peer; do
     addr=$(echo "$peer" | jq -r '.addr')
@@ -614,16 +614,12 @@ while IFS= read -r peer; do
     if [[ "$is_knots" == true ]]; then
         node_json=$(jq -n --arg addr "$addr" --arg id "$id" --arg subver "$subver" --arg detect "$detection_methods" \
                    '{addr: $addr, id: $id, subver: $subver, detection: $detect}')
-        if [[ -z "$KNOTS_NODES" ]]; then
-            KNOTS_NODES="$node_json"
-        else
-            KNOTS_NODES="${KNOTS_NODES}\n${node_json}"
-        fi
+        KNOTS_NODES_ARRAY+=("$node_json")
         ((TOTAL_KNOTS++))
     fi
 done < <(echo "$PEERS_JSON" | jq -c '.[]')
 
-if [[ -z "$KNOTS_NODES" ]]; then
+if [[ ${#KNOTS_NODES_ARRAY[@]} -eq 0 ]]; then
     echo "No Knots nodes found among current peers"
     echo ""
     echo "Detection summary:"
@@ -643,8 +639,7 @@ fi
 echo ""
 
 # Process each Knots node
-echo -e "$KNOTS_NODES" | while IFS= read -r node_json; do
-    [[ -z "$node_json" ]] && continue
+for node_json in "${KNOTS_NODES_ARRAY[@]}"; do
     
     addr=$(echo "$node_json" | jq -r '.addr')
     id=$(echo "$node_json" | jq -r '.id')
