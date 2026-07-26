@@ -53,7 +53,6 @@ Not sure how to SSH?
 ```bash
 # Automatically finds .cookie or bitcoin.conf
 wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.2/standalone-ban-knots.sh && \
-chmod +x standalone-ban-knots.sh && \
 ./standalone-ban-knots.sh --install-cron
 
 # With external IP banlist (optional - downloads from GitHub)
@@ -65,7 +64,6 @@ chmod +x standalone-ban-knots.sh && \
 **Option 2: Manual credentials**
 ```bash
 wget https://github.com/noosphere888/Ban-Knots/releases/download/v1.2.2/standalone-ban-knots.sh && \
-chmod +x standalone-ban-knots.sh && \
 ./standalone-ban-knots.sh -u yourrpcuser -P yourrpcpass --install-cron
 
 # With external IP banlist (optional)
